@@ -1,4 +1,4 @@
-ardu: ardu.nim nim.cfg ardusprites.nim
+ardu: ardu.nim nim.cfg ardusprites.nim level.bmp
 	nim cpp -d:release -d:danger --opt:size --os:standalone ardu
 
 ardu.hex: ardu
@@ -13,4 +13,4 @@ size: ardu
 	@echo "Maximum data space is 2560 bytes (rest will be left for local variables)."
 
 upload: ardu.hex
-	avrdude -C /etc/avrdude.conf -p atmega32u4 -b 57600 -P /dev/ttyACM0 -cavr109 -D -U ./ardu.hex
+	avrdude -C /etc/avrdude.conf -c arduino -p atmega32u4 -b 57600 -P /dev/ttyACM0 -cavr109 -D -U ./ardu.hex
