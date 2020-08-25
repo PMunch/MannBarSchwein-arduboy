@@ -1,4 +1,4 @@
-ardu: ardu.nim nim.cfg ardusprites.nim level.bmp
+ardu: ardu.nim nim.cfg ardusprites.nim *.bmp sprites/*.bmp
 	nim cpp -d:release -d:danger --opt:size --os:standalone ardu
 
 ardu.hex: ardu
