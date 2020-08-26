@@ -60,8 +60,9 @@ type
 proc `[]`(data: LevelData, idx: uint32): uint8 =
   pgmReadByte(cast[ptr uint8](cast[int](data.unsafeAddr) + idx.int))
 
-proc `[]`(data: PositionData, idx: uint32): uint16 =
+proc `[]`(data: PositionData, idx: SomeInteger): uint16 =
   pgmReadWord(cast[ptr uint8](cast[int](data.unsafeAddr) + (idx * 2).int))
+  #array[data.count, uint16](data)[idx]
 
 macro loadPositions(name: untyped, levelString: static[string]): untyped =
   #echo levelString
@@ -82,6 +83,7 @@ macro loadPositions(name: untyped, levelString: static[string]): untyped =
   let count = levelData.len
   result = quote do:
     let `name` {.codegenDecl: "const PROGMEM $# $#".} = PositionData[`count`, `w`](`levelData`)
+    #let `name` = PositionData[`count`, `w`](`levelData`)
   echo result.repr
 
 macro loadLevel(name: untyped, levelString: static[string]): untyped =
@@ -115,7 +117,7 @@ loadLevelData(level, "level.bmp")
 loadLevelData(manfood, "manfood.bmp")
 loadLevelData(bearfood, "bearfood.bmp")
 loadLevelData(pigfood, "pigfood.bmp")
-loadLevelData(spikes, "spikes.bmp")
+loadPositionData(spikes, "spikes.bmp")
 loadPositionData(mangates, "mangate.bmp")
 loadPositionData(piggates, "piggate.bmp")
 loadPositionData(beargates, "beargate.bmp")
@@ -138,15 +140,19 @@ var
   score = 0
   particles: array[100, Particle]
   sp, ep: uint16
+  lowestSpikeIdx: uint16 = 0
 
 template legFrame(): untyped = [leg1.unsafeAddr, leg2.unsafeAddr][(frame div 4) mod 2][]
 
-proc drawPlayer() =
+template calculatePlayerBounds() {.dirty.} =
   let
     x = 110'i16
     y = 64 - 11 - y
     by = ((frame div 4) mod 2).int16
     hy = (((frame - 2) div 4) mod 2).int16
+
+proc drawPlayer() =
+  calculatePlayerBounds()
   if subFrame == 0 and currentCharacter == Bar:
     drawBitmap(x, y-hy, bearHead, NoMask, SpriteUnMasked)
     drawBitmap(x+2, y+7-by, bearBody, NoMask, SpriteUnMasked)
@@ -163,13 +169,10 @@ proc drawPlayer() =
 template drawGate(c, state: untyped): untyped =
   let
     nextGate = `c gates`[`c gateidx`]
-    gateX = (nextGate mod `c gates`.width)*6
+    gateX = (nextGate mod `c gates`.width) * 6
     gateY = nextGate div `c gates`.width
     lvlpos = `c gates`.width * 6 - frame
   if gateX < lvlpos and lvlpos - gateX < 128 + 15:
-    if state == Mann:
-      arduboy.setCursor(4, 9)
-      discard arduboy.print(lvlpos - gateX)
     if currentCharacter == state:
       drawBitmap(128 - (lvlpos - gateX).int16, (gateY * 6).int16 + 4, `c gate`)
     else:
@@ -185,6 +188,24 @@ template drawObject(objects, sprite: untyped): untyped =
   if (mask and objects[i]) == mask and (mask and taken[i]) != mask:
     drawBitmap(offset + 128 - 6 - 6*(i-start).int16, 64'i16 - h, sprite)
 
+template drawObject2(c, state: untyped): untyped =
+  var passed = typeof(lowestSpikeIdx).default
+  if subframe == 0 and lowestSpikeIdx != spikes.width:
+    for i in lowestSpikeIdx ..< spikes.width:
+      let
+        next = spikes[i]
+        x = (next mod spikes.width) * 6
+        y = next div spikes.width
+        lvlpos = spikes.width * 6 - frame
+      if x < lvlpos:
+        if lvlpos - x < 128 + 6:
+          drawBitmap(128 - (lvlpos - x).int16, (y * 6).int16 + 18, spike)
+        else:
+          break
+      else:
+        inc passed
+    lowestSpikeIdx += passed
+
 proc drawLevel() =
   if subFrame == 1:
     drawGate(man, Mann)
@@ -192,6 +213,7 @@ proc drawLevel() =
     drawGate(pig, Schwein)
   if subFrame == 0:
     drawGate(bear, Bar)
+  spikes.drawObject2(spike)
 
   let
     start = frame div 6
@@ -202,7 +224,6 @@ proc drawLevel() =
       mask = 0b0000_0001'u8
     while mask != 0:
       level.drawBlock(ground2)
-      spikes.drawBlock(spike)
       if subFrame == 1:
         manfood.drawObject(money)
       if subFrame == 2:
@@ -270,6 +291,7 @@ template gameOver() =
   mangateidx = 0
   beargateidx = 0
   piggateidx = 0
+  lowestSpikeIdx = 0
   sp = 0
   ep = 0
   reset taken
@@ -356,30 +378,38 @@ proc loop*() {.exportc.} =
           yspeed = 0
       elif (frame - jframe) mod 4 == 0:
         yspeed -= 1
-      if landedOn(spikes[start]):
-        gameOver()
+      #if landedOn(spikes[start]):
+      #  gameOver()
       if collides(level[start+1]):
         gameOver()
-      if collidesGate(man, Mann) or collidesGate(bear, Bar) or
-        collidesGate(pig, Schwein):
-        gameOver()
+      block:
+        calculatePlayerBounds()
+        arduboy.fillRect(x, y, 8, 13)
 
-      template pickup(character, objects: untyped): untyped =
-        if currentCharacter == character and landedOn(objects[start]):
-          if (taken[start] and groundMask) == 0:
-            score += 500
-            let offset = (frame mod 6).int16
-            # TODO: Figure out where to draw these..
-            #createCircle(offset + 128 - 6 - 6*(i-start).int16, 64'i16 - h, 0.3)
-            taken[start] = taken[start] or groundMask
-        if currentCharacter == character and collides(objects[start+1]):
-          if (taken[start+1] and (frontMask or frontMask2)) == 0:
-            score += 500
-            createCircle(20, 20, 0.3)
-            taken[start+1] = taken[start+1] or frontMask or frontMask2 # Just don't put two different foods right over each other
-      Mann.pickup(manfood)
-      Bar.pickup(bearfood)
-      Schwein.pickup(pigfood)
+    #  if collidesGate(man, Mann) or collidesGate(bear, Bar) or
+    #    collidesGate(pig, Schwein):
+    #    gameOver()
+
+    #  template pickup(character, objects: untyped): untyped =
+    #    if currentCharacter == character and landedOn(objects[start]):
+    #      if (taken[start] and groundMask) == 0:
+    #        score += 500
+    #        let offset = (frame mod 6).int16
+    #        #createCircle(128 - 6*3 + offset, 14*6 + 7'i16 - y, 0.3)
+    #        taken[start] = taken[start] or groundMask
+    #    if currentCharacter == character and collides(objects[start+1]):
+    #      if (taken[start+1] and (frontMask or frontMask2)) == 0:
+    #        score += 500
+    #        let offset = (frame mod 6).int16
+    #        if (taken[start+1] and frontMask) == frontMask:
+    #          createCircle(128 - 6*4 + offset, 9*6 + 7'i16 - y, 0.3)
+    #          taken[start+1] = taken[start+1] or frontMask
+    #        else:
+    #          createCircle(128 - 6*4 + offset, 8*6 + 7'i16 - y, 0.3)
+    #          taken[start+1] = taken[start+1] or frontMask2
+    #  Mann.pickup(manfood)
+    #  Bar.pickup(bearfood)
+    #  Schwein.pickup(pigfood)
 
       y += yspeed
 
