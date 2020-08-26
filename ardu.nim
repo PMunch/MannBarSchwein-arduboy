@@ -306,6 +306,107 @@ macro createCircle(x, y: int, speed: static[float]): untyped =
       createParticle(`x`, `y`, `xs`, `ys`)
   echo result.repr
 
+macro play(scene: Scene) =
+  result = quote do:
+    case `scene`:
+    else: discard
+  for scene in Scene:
+    result.add nnkOfBranch.newTree(newLit(scene), newCall(newIdentNode("play" & $scene)))
+
+proc playTitle() =
+  drawTitle()
+  if subFrame == 0:
+    if arduboy.pressed(AButton):
+      scene = Game
+      frame = 0
+      score = 0
+    let keys = arduboy.buttonsState()
+    if (keys and UP_BUTTON) != 0:
+      myDelay += 10
+    if (keys and DOWN_BUTTON) != 0:
+      myDelay -= 10
+    if (keys and LEFT_BUTTON) != 0:
+      myDelay -= 1
+    if (keys and RIGHT_BUTTON) != 0:
+      myDelay += 1
+
+proc playGame() =
+  #createParticle(10, 20+ep.int16, 1.5.toFixed, (-0.5).toFixed)
+  #arduboy.setCursor(64 - ((score.float.log10 + 1) * 2.5).int16, 9)
+  #discard arduboy.print(score)
+  drawPlayer()
+  drawLevel()
+  drawParticles()
+  if subFrame == 0:
+    if arduboy.justPressed(BButton) or arduboy.justPressed(DownButton):
+      currentCharacter.next()
+    if (arduboy.justPressed(AButton) or arduboy.justPressed(UpButton)) and yspeed == 0:
+      yspeed = 3
+      jframe = frame
+    let
+      start = frame div 6 + 2
+      h = y div 6
+      groundMask = 0b1000_0000'u8 shr (h - 1)
+      frontMask = 0b1000_0000'u8 shr h
+      frontMask2 = 0b1000_0000'u8 shr (h + 1)
+    template collides(tile: untyped): untyped =
+      (frontMask != 0 and (tile and frontMask) == frontMask) or
+      (frontMask2 != 0 and (tile and frontMask2) == frontMask2)
+
+    template landedOn(tile: untyped): untyped =
+      (groundMask != 0 and (tile and groundMask) == groundMask)
+
+    template collidesGate(c, state: untyped): untyped =
+      block:
+        let
+          nextGate = `c gates`[`c gateidx`]
+          gateX = (nextGate mod `c gates`.width)*6
+          lvlpos = `c gates`.width * 6 - frame
+        (currentCharacter != state and gateX < lvlpos and
+          lvlpos - gateX < 128 + 15 and lvlpos - gateX < 30 and
+          lvlpos - gateX > 20)
+
+    if landedOn(level[start]):
+      if yspeed < 0:
+        y = h * 6
+        yspeed = 0
+    elif (frame - jframe) mod 4 == 0:
+      yspeed -= 1
+    #if landedOn(spikes[start]):
+    #  gameOver()
+    if collides(level[start+1]):
+      gameOver()
+    block:
+      calculatePlayerBounds()
+      arduboy.fillRect(x, y, 8, 13)
+
+  #  if collidesGate(man, Mann) or collidesGate(bear, Bar) or
+  #    collidesGate(pig, Schwein):
+  #    gameOver()
+
+  #  template pickup(character, objects: untyped): untyped =
+  #    if currentCharacter == character and landedOn(objects[start]):
+  #      if (taken[start] and groundMask) == 0:
+  #        score += 500
+  #        let offset = (frame mod 6).int16
+  #        #createCircle(128 - 6*3 + offset, 14*6 + 7'i16 - y, 0.3)
+  #        taken[start] = taken[start] or groundMask
+  #    if currentCharacter == character and collides(objects[start+1]):
+  #      if (taken[start+1] and (frontMask or frontMask2)) == 0:
+  #        score += 500
+  #        let offset = (frame mod 6).int16
+  #        if (taken[start+1] and frontMask) == frontMask:
+  #          createCircle(128 - 6*4 + offset, 9*6 + 7'i16 - y, 0.3)
+  #          taken[start+1] = taken[start+1] or frontMask
+  #        else:
+  #          createCircle(128 - 6*4 + offset, 8*6 + 7'i16 - y, 0.3)
+  #          taken[start+1] = taken[start+1] or frontMask2
+  #  Mann.pickup(manfood)
+  #  Bar.pickup(bearfood)
+  #  Schwein.pickup(pigfood)
+
+    y += yspeed
+
 proc loop*() {.exportc.} =
   if not arduboy.nextFrame():
     return
@@ -319,99 +420,7 @@ proc loop*() {.exportc.} =
     #arduboy.setCursor(4, 9)
     #discard arduboy.Print(myDelay)
 
-  case scene:
-  of Title:
-    drawTitle()
-    if subFrame == 0:
-      if arduboy.pressed(AButton):
-        scene = Game
-        frame = 0
-        score = 0
-      let keys = arduboy.buttonsState()
-      if (keys and UP_BUTTON) != 0:
-        myDelay += 10
-      if (keys and DOWN_BUTTON) != 0:
-        myDelay -= 10
-      if (keys and LEFT_BUTTON) != 0:
-        myDelay -= 1
-      if (keys and RIGHT_BUTTON) != 0:
-        myDelay += 1
-  of Game:
-      #createParticle(10, 20+ep.int16, 1.5.toFixed, (-0.5).toFixed)
-    #arduboy.setCursor(64 - ((score.float.log10 + 1) * 2.5).int16, 9)
-    #discard arduboy.print(score)
-    drawPlayer()
-    drawLevel()
-    drawParticles()
-    if subFrame == 0:
-      if arduboy.justPressed(BButton) or arduboy.justPressed(DownButton):
-        currentCharacter.next()
-      if (arduboy.justPressed(AButton) or arduboy.justPressed(UpButton)) and yspeed == 0:
-        yspeed = 3
-        jframe = frame
-      let
-        start = frame div 6 + 2
-        h = y div 6
-        groundMask = 0b1000_0000'u8 shr (h - 1)
-        frontMask = 0b1000_0000'u8 shr h
-        frontMask2 = 0b1000_0000'u8 shr (h + 1)
-      template collides(tile: untyped): untyped =
-        (frontMask != 0 and (tile and frontMask) == frontMask) or
-        (frontMask2 != 0 and (tile and frontMask2) == frontMask2)
-
-      template landedOn(tile: untyped): untyped =
-        (groundMask != 0 and (tile and groundMask) == groundMask)
-
-      template collidesGate(c, state: untyped): untyped =
-        block:
-          let
-            nextGate = `c gates`[`c gateidx`]
-            gateX = (nextGate mod `c gates`.width)*6
-            lvlpos = `c gates`.width * 6 - frame
-          (currentCharacter != state and gateX < lvlpos and
-            lvlpos - gateX < 128 + 15 and lvlpos - gateX < 30 and
-            lvlpos - gateX > 20)
-
-      if landedOn(level[start]):
-        if yspeed < 0:
-          y = h * 6
-          yspeed = 0
-      elif (frame - jframe) mod 4 == 0:
-        yspeed -= 1
-      #if landedOn(spikes[start]):
-      #  gameOver()
-      if collides(level[start+1]):
-        gameOver()
-      block:
-        calculatePlayerBounds()
-        arduboy.fillRect(x, y, 8, 13)
-
-    #  if collidesGate(man, Mann) or collidesGate(bear, Bar) or
-    #    collidesGate(pig, Schwein):
-    #    gameOver()
-
-    #  template pickup(character, objects: untyped): untyped =
-    #    if currentCharacter == character and landedOn(objects[start]):
-    #      if (taken[start] and groundMask) == 0:
-    #        score += 500
-    #        let offset = (frame mod 6).int16
-    #        #createCircle(128 - 6*3 + offset, 14*6 + 7'i16 - y, 0.3)
-    #        taken[start] = taken[start] or groundMask
-    #    if currentCharacter == character and collides(objects[start+1]):
-    #      if (taken[start+1] and (frontMask or frontMask2)) == 0:
-    #        score += 500
-    #        let offset = (frame mod 6).int16
-    #        if (taken[start+1] and frontMask) == frontMask:
-    #          createCircle(128 - 6*4 + offset, 9*6 + 7'i16 - y, 0.3)
-    #          taken[start+1] = taken[start+1] or frontMask
-    #        else:
-    #          createCircle(128 - 6*4 + offset, 8*6 + 7'i16 - y, 0.3)
-    #          taken[start+1] = taken[start+1] or frontMask2
-    #  Mann.pickup(manfood)
-    #  Bar.pickup(bearfood)
-    #  Schwein.pickup(pigfood)
-
-      y += yspeed
+  scene.play()
 
   subFrame += 1
   if subFrame == 3:
