@@ -1,7 +1,10 @@
 include arduboy
 import ardusprites
-import macros
+import macros, macroutils
 import math
+import tables
+
+const colours = false
 
 const spritePath {.strdefine.}: string = "sprites/"
 
@@ -114,9 +117,9 @@ template loadLevelData(name: untyped, file: static[string]): untyped =
 
 
 loadLevelData(level, "level.bmp")
-loadLevelData(manfood, "manfood.bmp")
-loadLevelData(bearfood, "bearfood.bmp")
-loadLevelData(pigfood, "pigfood.bmp")
+loadPositionData(manfoods, "manfood.bmp")
+loadPositionData(bearfoods, "bearfood.bmp")
+loadPositionData(pigfoods, "pigfood.bmp")
 loadPositionData(spikes, "spikes.bmp")
 loadPositionData(mangates, "mangate.bmp")
 loadPositionData(piggates, "piggate.bmp")
@@ -133,13 +136,16 @@ var
   currentCharacter: Character
   y: int16 = 10
   yspeed: int16 = -1
-  mangateidx: uint8 = 0
-  piggateidx: uint8 = 0
-  beargateidx: uint8 = 0
   taken: array[level.count, uint8]
   score = 0
   particles: array[100, Particle]
   sp, ep: uint16
+  lowestmanfoodidx: uint16 = 0
+  lowestpigfoodidx: uint16 = 0
+  lowestbearfoodidx: uint16 = 0
+  lowestmangateidx: uint16 = 0
+  lowestpiggateidx: uint16 = 0
+  lowestbeargateidx: uint16 = 0
   lowestSpikeIdx: uint16 = 0
 
 template legFrame(): untyped = [leg1.unsafeAddr, leg2.unsafeAddr][(frame div 4) mod 2][]
@@ -166,19 +172,19 @@ proc drawPlayer() =
     drawBitmap(x+2, y+7-by, pigBody, NoMask, SpriteUnMasked)
     drawBitmap(x+1, y+11-by, legFrame, NoMask, SpriteUnMasked)
 
-template drawGate(c, state: untyped): untyped =
-  let
-    nextGate = `c gates`[`c gateidx`]
-    gateX = (nextGate mod `c gates`.width) * 6
-    gateY = nextGate div `c gates`.width
-    lvlpos = `c gates`.width * 6 - frame
-  if gateX < lvlpos and lvlpos - gateX < 128 + 15:
-    if currentCharacter == state:
-      drawBitmap(128 - (lvlpos - gateX).int16, (gateY * 6).int16 + 4, `c gate`)
-    else:
-      drawBitmap(128 - (lvlpos - gateX).int16, (gateY * 6).int16 + 4, `c gateClosed`)
-  if lvlpos - gateX > uint16.high-100 and `c gateidx` < `c gates`.count - 1:
-    inc `c gateidx`
+#template drawGate(c, state: untyped): untyped =
+#  let
+#    nextGate = `c gates`[`lowest c idx`]
+#    gateX = (nextGate mod `c gates`.width) * 6
+#    gateY = nextGate div `c gates`.width
+#    lvlpos = `c gates`.width * 6 - frame
+#  if gateX < lvlpos and lvlpos - gateX < 128 + 15:
+#    if currentCharacter == state:
+#      drawBitmap(128 - (lvlpos - gateX).int16, (gateY * 6).int16 + 4, `c gate`)
+#    else:
+#      drawBitmap(128 - (lvlpos - gateX).int16, (gateY * 6).int16 + 4, `c gateClosed`)
+#  if lvlpos - gateX > uint16.high-100 and `lowest c idx` < `c gates`.count - 1:
+#    inc `lowest c idx`
 
 template drawBlock(blocks, sprite: untyped): untyped =
   if (mask and blocks[i]) == mask:
@@ -188,33 +194,64 @@ template drawObject(objects, sprite: untyped): untyped =
   if (mask and objects[i]) == mask and (mask and taken[i]) != mask:
     drawBitmap(offset + 128 - 6 - 6*(i-start).int16, 64'i16 - h, sprite)
 
-template drawObject2(c, state: untyped): untyped =
-  var passed = typeof(lowestSpikeIdx).default
-  if subframe == 0 and lowestSpikeIdx != spikes.width:
-    for i in lowestSpikeIdx ..< spikes.width:
-      let
-        next = spikes[i]
-        x = (next mod spikes.width) * 6
-        y = next div spikes.width
-        lvlpos = spikes.width * 6 - frame
-      if x < lvlpos:
-        if lvlpos - x < 128 + 6:
-          drawBitmap(128 - (lvlpos - x).int16, (y * 6).int16 + 18, spike)
-        else:
-          break
+template processEntity(entity, spriteWidth, action: untyped): untyped =
+  var passed = typeof(`lowest entity Idx`).default
+  #if `lowest entity Idx` != `entity s`.width:
+  #  for i in `lowest entity Idx` ..< `entity s`.width:
+  for i in `lowest entity Idx` ..< `entity s`.count:
+    let
+      next = `entity s`[i]
+      x = (next mod `entity s`.width) * 6
+      y = (next div `entity s`.width) * 6
+      lvlpos = `entity s`.width * 6 - frame
+    if x < lvlpos:
+      if lvlpos - x < 128 + spriteWidth:
+        let
+          `entity X` {.inject.} = (128 - lvlpos + x).int16
+          `entity Y` {.inject.} = (y + 64 - 8*6 + 2).int16
+        action
       else:
-        inc passed
-    lowestSpikeIdx += passed
+        break
+    else:
+      inc passed
+  `lowest entity Idx` += passed
+
+template processGateBody(character, state: untyped): untyped =
+  if currentCharacter == state:
+    drawBitmap(`character gateX`, `character gateY` - 13, `character gate`)
+  else:
+    drawBitmap(`character gateX`, `character gateY` - 13, `character gateClosed`)
+
+template processGate(character, gate, state: untyped): untyped =
+  processEntity(gate, 15):
+    processGateBody(character, state)
+
+macro processLevelEntities(branches: varargs[untyped]): untyped =
+  # TODO: Swap string for enum for superQuote compat
+  var actions: Table[string, NimNode]
+  for branch in branches:
+    actions[$branch[0]] = branch[1]
+  for key, action in actions:
+    echo key, ":", action.repr
+  result = superQuote do:
+    if subFrame == 1:
+      processGate(man, mangate, Mann)
+      processEntity(manfood, 6):
+        drawBitmap(manfoodX, manfoodY, money)
+    if subFrame == 2:
+      processGate(pig, piggate, Schwein)
+      processEntity(pigfood, 6):
+        drawBitmap(pigfoodX, pigfoodY, apple)
+    if subFrame == 0:
+      processGate(bear, beargate, Bar)
+      processEntity(spike, 6):
+        `actions["Spike"]`
+        #drawBitmap(spikeX, spikeY, spike)
+      processEntity(bearfood, 6):
+        drawBitmap(bearfoodX, bearfoodY, meat)
+  echo result.repr
 
 proc drawLevel() =
-  if subFrame == 1:
-    drawGate(man, Mann)
-  if subFrame == 2:
-    drawGate(pig, Schwein)
-  if subFrame == 0:
-    drawGate(bear, Bar)
-  spikes.drawObject2(spike)
-
   let
     start = frame div 6
     offset = (frame mod 6).int16
@@ -224,21 +261,15 @@ proc drawLevel() =
       mask = 0b0000_0001'u8
     while mask != 0:
       level.drawBlock(ground2)
-      if subFrame == 1:
-        manfood.drawObject(money)
-      if subFrame == 2:
-        pigfood.drawObject(apple)
-      if subFrame == 0:
-        bearfood.drawObject(meat)
       mask = mask shl 1
       h -= 6
 
 proc drawTitle() =
-  if subFrame == 0:
+  if subFrame == 0 and frame > 50:
     drawBitmap(46, 24, bar)
-  if subFrame == 1:
+  if subFrame == 1 and frame > 10:
     drawBitmap(6, 24, mann)
-  if subFrame == 2:
+  if subFrame == 2 and frame > 90:
     drawBitmap(75, 24, schwein)
 
 iterator roundRange[R, T](buffer: var array[R, T], longRange: HSlice): var T =
@@ -286,11 +317,15 @@ proc setup*() {.exportc.} =
   myDelay = 7245 #4705
 
 template gameOver() =
+  frame = 0
   scene = Title
   currentCharacter = Mann
-  mangateidx = 0
-  beargateidx = 0
-  piggateidx = 0
+  lowestMangateIdx = 0
+  lowestBeargateIdx = 0
+  lowestPiggateIdx = 0
+  lowestManfoodIdx = 0
+  lowestBearfoodIdx = 0
+  lowestPigfoodIdx = 0
   lowestSpikeIdx = 0
   sp = 0
   ep = 0
@@ -315,7 +350,7 @@ macro play(scene: Scene) =
 
 proc playTitle() =
   drawTitle()
-  if subFrame == 0:
+  if subFrame == 0 and frame > 50: # Slight delay here to make sure that a mistimed jump doesn't start a new game
     if arduboy.pressed(AButton):
       scene = Game
       frame = 0
@@ -335,6 +370,9 @@ proc playGame() =
   #arduboy.setCursor(64 - ((score.float.log10 + 1) * 2.5).int16, 9)
   #discard arduboy.print(score)
   drawPlayer()
+  processLevelEntities:
+  of Spike:
+    drawBitmap(spikeX, spikeY, spike)
   drawLevel()
   drawParticles()
   if subFrame == 0:
@@ -412,7 +450,10 @@ proc loop*() {.exportc.} =
     return
   while micros() - tempTime < myDelay: discard
   tempTime = micros()
-  arduboy.display()
+
+  # Updates the display every subframe for colours, or every full frame for bw
+  if colours or subFrame == 0:
+    arduboy.display()
 
   if subFrame == 0:
     arduboy.clear()
