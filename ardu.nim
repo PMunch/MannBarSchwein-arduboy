@@ -3,6 +3,10 @@ import ardusprites
 import macros, macroutils
 import math
 import tables
+import fixedpoint
+
+defFixedPoint(Speed, int8, 4)
+defFixedPoint(Position, int16, 4)
 
 const colours = false
 
@@ -50,15 +54,15 @@ proc roundFixed(x: int16): int16 =
 
 type
   Scene = enum
-    Title, Game
+    Title, Game, GameOver
   Character = enum
     Mann, Bar, Schwein
   LevelData[count: static[int]] = distinct array[count, uint8]
   PositionData[count, width: static[int]] = distinct array[count, uint16]
   Particle = object
     age: uint8
-    x, y: int16
-    xs, ys: int8
+    x, y: Position
+    xs, ys: Speed
 
 proc `[]`(data: LevelData, idx: uint32): uint8 =
   pgmReadByte(cast[ptr uint8](cast[int](data.unsafeAddr) + idx.int))
@@ -126,36 +130,42 @@ loadPositionData(piggates, "piggate.bmp")
 loadPositionData(beargates, "beargate.bmp")
 
 var
+  # We don't call NimMain anywhere, so you can't instantiate variables here
   arduboy: Arduboy2
-  subFrame = 0'u8
+  subFrame: uint8
   frame: uint32
-  jframe: uint32
   myDelay: culong
   tempTime: culong
-  scene = Title
+  scene: Scene
   currentCharacter: Character
-  y: int16 = 10
-  yspeed: int16 = -1
-  taken: array[level.count, uint8]
-  score = 0
-  particles: array[100, Particle]
+  y: Position
+  yspeed: Speed
+  score: int16
+  particles: array[150, Particle]
   sp, ep: uint16
-  lowestmanfoodidx: uint16 = 0
-  lowestpigfoodidx: uint16 = 0
-  lowestbearfoodidx: uint16 = 0
-  lowestmangateidx: uint16 = 0
-  lowestpiggateidx: uint16 = 0
-  lowestbeargateidx: uint16 = 0
-  lowestSpikeIdx: uint16 = 0
+  lowestManFoodIdx: uint16
+  lowestPigFoodIdx: uint16
+  lowestBearFoodIdx: uint16
+  lowestManGateIdx: uint16
+  lowestPigGateIdx: uint16
+  lowestBearGateIdx: uint16
+  lowestSpikeIdx: uint16
+  takenManFood: set[0..manFoods.count]
+  takenBearFood: set[0..bearFoods.count]
+  takenPigFood: set[0..pigFoods.count]
 
 template legFrame(): untyped = [leg1.unsafeAddr, leg2.unsafeAddr][(frame div 4) mod 2][]
 
 template calculatePlayerBounds() {.dirty.} =
   let
     x = 110'i16
-    y = 64 - 11 - y
+    y = 64 - 11 - y.getInt
     by = ((frame div 4) mod 2).int16
     hy = (((frame - 2) div 4) mod 2).int16
+
+proc playerBoundingBox(): tuple[x, y: int16, w, h: uint8] =
+  calculatePlayerBounds()
+  (x, y - hy, 8'u8, (13 - by).uint8)
 
 proc drawPlayer() =
   calculatePlayerBounds()
@@ -186,72 +196,57 @@ proc drawPlayer() =
 #  if lvlpos - gateX > uint16.high-100 and `lowest c idx` < `c gates`.count - 1:
 #    inc `lowest c idx`
 
-template drawBlock(blocks, sprite: untyped): untyped =
-  if (mask and blocks[i]) == mask:
-    drawBitmap(offset + 128 - 6 - 6*(i-start).int16, 64'i16 - h, sprite)
-
-template drawObject(objects, sprite: untyped): untyped =
-  if (mask and objects[i]) == mask and (mask and taken[i]) != mask:
-    drawBitmap(offset + 128 - 6 - 6*(i-start).int16, 64'i16 - h, sprite)
-
 template processEntity(entity, spriteWidth, action: untyped): untyped =
   var passed = typeof(`lowest entity Idx`).default
   #if `lowest entity Idx` != `entity s`.width:
   #  for i in `lowest entity Idx` ..< `entity s`.width:
   for i in `lowest entity Idx` ..< `entity s`.count:
-    let
-      next = `entity s`[i]
-      x = (next mod `entity s`.width) * 6
-      y = (next div `entity s`.width) * 6
-      lvlpos = `entity s`.width * 6 - frame
-    if x < lvlpos:
-      if lvlpos - x < 128 + spriteWidth:
-        let
-          `entity X` {.inject.} = (128 - lvlpos + x).int16
-          `entity Y` {.inject.} = (y + 64 - 8*6 + 2).int16
-        action
+    if (when declared(`taken entity`): not `taken entity`.contains i else: true):
+      let
+        next = `entity s`[i]
+        x = (next mod `entity s`.width) * 6
+        y = (next div `entity s`.width) * 6
+        lvlpos = `entity s`.width * 6 - frame
+      if x < lvlpos:
+        if lvlpos - x < 128 + spriteWidth:
+          let
+            `entity Idx` {.inject.} = i
+            `entity X` {.inject.} = (128 - lvlpos + x).int16
+            `entity Y` {.inject.} = (y + 64 - 8*6 + 2).int16
+          action
+        else:
+          break
       else:
-        break
-    else:
-      inc passed
+        inc passed
   `lowest entity Idx` += passed
 
-template processGateBody(character, state: untyped): untyped =
-  if currentCharacter == state:
-    drawBitmap(`character gateX`, `character gateY` - 13, `character gate`)
-  else:
-    drawBitmap(`character gateX`, `character gateY` - 13, `character gateClosed`)
-
-template processGate(character, gate, state: untyped): untyped =
-  processEntity(gate, 15):
-    processGateBody(character, state)
-
 macro processLevelEntities(branches: varargs[untyped]): untyped =
-  # TODO: Swap string for enum for superQuote compat
-  var actions: Table[string, NimNode]
+  type Entity = enum
+    Spike, ManFood, BearFood, PigFood, ManGate, BearGate, PigGate
+  var actions: Table[Entity, NimNode]
   for branch in branches:
-    actions[$branch[0]] = branch[1]
-  for key, action in actions:
-    echo key, ":", action.repr
+    actions[parseEnum[Entity]($branch[0])] = branch[1]
   result = superQuote do:
     if subFrame == 1:
-      processGate(man, mangate, Mann)
+      processEntity(mangate, 15):
+        `actions[ManGate]`
       processEntity(manfood, 6):
-        drawBitmap(manfoodX, manfoodY, money)
+        `actions[ManFood]`
     if subFrame == 2:
-      processGate(pig, piggate, Schwein)
+      processEntity(piggate, 15):
+        `actions[PigGate]`
       processEntity(pigfood, 6):
-        drawBitmap(pigfoodX, pigfoodY, apple)
+        `actions[PigFood]`
     if subFrame == 0:
-      processGate(bear, beargate, Bar)
+      processEntity(beargate, 15):
+        `actions[BearGate]`
       processEntity(spike, 6):
-        `actions["Spike"]`
-        #drawBitmap(spikeX, spikeY, spike)
+        `actions[Spike]`
       processEntity(bearfood, 6):
-        drawBitmap(bearfoodX, bearfoodY, meat)
+        `actions[BearFood]`
   echo result.repr
 
-proc drawLevel() =
+template processLevel(action: untyped) =
   let
     start = frame div 6
     offset = (frame mod 6).int16
@@ -260,7 +255,12 @@ proc drawLevel() =
       h = 7*6 + 4'i16
       mask = 0b0000_0001'u8
     while mask != 0:
-      level.drawBlock(ground2)
+      if (mask and level[i]) == mask:
+        let
+          blockX {.inject.} = offset + 128 - 6 - 6*(i-start).int16
+          blockY {.inject.} = 64'i16 - h
+        action
+
       mask = mask shl 1
       h -= 6
 
@@ -271,6 +271,9 @@ proc drawTitle() =
     drawBitmap(6, 24, mann)
   if subFrame == 2 and frame > 90:
     drawBitmap(75, 24, schwein)
+  if subFrame == 2 and frame > 100 and (frame div 10) mod 10 > 5:
+    arduboy.setCursor(16, 48)
+    discard arduboy.print("Press A to start")
 
 iterator roundRange[R, T](buffer: var array[R, T], longRange: HSlice): var T =
   ## Iterator that takes a buffer and two indices. The buffer is treated as
@@ -284,32 +287,32 @@ proc drawParticles() =
   var deadParticles = typeof(sp).default
   for particle in particles.roundRange sp ..< ep:
     if subframe == 0:
-      if particle.age == 9:
+      if particle.age >= 18:
         inc deadParticles
         continue
-      particle.x += particle.xs + toFixed(1)
+      particle.x += particle.xs +
+        (if scene != GameOver: toSpeed(1) else: toSpeed(0))
       particle.y += particle.ys
-      particle.ys += 1
-      #if frame mod (32 - (abs(particle.xs) div 4)).uint32 == 0:
-      #  particle.x += 1
-      #if frame mod (32 - (abs(particle.ys) div 4)).uint32 == 0:
-      #  particle.y += 1
-      if frame mod 2 == 0:
-        inc particle.age
+      particle.ys += toSpeed(0.1)
+      #if frame mod 2 == 0:
+      inc particle.age
     if subFrame == particle.age div 3:
-      arduboy.drawPixel(particle.x.roundFixed, particle.y.roundFixed)
+      arduboy.drawPixel(particle.x.getInt, particle.y.getInt)
   sp += deadParticles
 
-proc createParticle(x, y: int16, xs, ys: int8) =
+proc createParticle(x, y: int16, xs, ys: Speed) =
   particles[ep].age = 0
-  particles[ep].x = x shl 4
-  particles[ep].y = y shl 4
+  particles[ep].x.set x
+  particles[ep].y.set y
   particles[ep].xs = xs
   particles[ep].ys = ys
   inc ep
+  if ep == sp:
+    inc sp
 
-template next(x: var Character) =
-  x = Character((x.ord + 1) mod (Character.high.int + 1))
+template next(character: var Character) =
+  createParticleCircle(player.x + 1, player.y + 6, 2.0)
+  character = Character((character.ord + 1) mod (Character.high.int + 1))
 
 proc setup*() {.exportc.} =
   arduboy.begin()
@@ -317,28 +320,19 @@ proc setup*() {.exportc.} =
   myDelay = 7245 #4705
 
 template gameOver() =
-  frame = 0
-  scene = Title
-  currentCharacter = Mann
-  lowestMangateIdx = 0
-  lowestBeargateIdx = 0
-  lowestPiggateIdx = 0
-  lowestManfoodIdx = 0
-  lowestBearfoodIdx = 0
-  lowestPigfoodIdx = 0
-  lowestSpikeIdx = 0
-  sp = 0
-  ep = 0
-  reset taken
+  if scene != GameOver:
+    scene = GameOver
+    createParticleCircle(player.x, player.y, 1.5)
+    createParticleCircle(player.x, player.y, 1.0, 36 div 2)
 
-macro createCircle(x, y: int, speed: static[float]): untyped =
+macro createParticleCircle(x, y: int, speed: static[float], startAngle: static[int] = 0): untyped =
   result = newStmtList()
-  for angle in countup(0, 360, 36):
+  for angle in countup(startAngle, 360, 36):
     let
-      xs = (speed * cos(angle.float.degToRad)).toFixed
-      ys = (speed * sin(angle.float.degToRad)).toFixed
-    result.add quote do:
-      createParticle(`x`, `y`, `xs`, `ys`)
+      xs = (speed * cos(angle.float.degToRad))
+      ys = (speed * sin(angle.float.degToRad))
+    #result.add quote do:
+    #  createParticle(`x`, `y`, toSpeed(`xs`), toSpeed(`ys`))
   echo result.repr
 
 macro play(scene: Scene) =
@@ -355,6 +349,8 @@ proc playTitle() =
       scene = Game
       frame = 0
       score = 0
+      y = toPosition(20)
+      yspeed = toSpeed(-0.5)
     let keys = arduboy.buttonsState()
     if (keys and UP_BUTTON) != 0:
       myDelay += 10
@@ -365,91 +361,120 @@ proc playTitle() =
     if (keys and RIGHT_BUTTON) != 0:
       myDelay += 1
 
+template collides(bounds: tuple[x, y: int16, w, h: uint8], entityX, entityY: int16, entityW, entityH = 6'u8): bool =
+  bounds.x < entityX + entityW.int16 and
+  bounds.x + bounds.w.int16 > entityX and
+  bounds.y < entityY + entityH.int16 and
+  bounds.y + bounds.h.int16 > entityY
+
+template processFood(character, state: untyped): untyped =
+  if currentCharacter == state and player.collides(`character FoodX`, `character FoodY`):
+    `taken character Food`.incl `character FoodIdx`
+    score += 500
+    createParticleCircle(`character FoodX`, `character FoodY` - 3, 1.0)
+    createParticleCircle(`character FoodX`, `character FoodY` - 3, 0.5, 36 div 2)
+
+template processGate(character, state: untyped): untyped =
+  if currentCharacter == state:
+    drawBitmap(`character gateX`, `character gateY` - 13, `character gate`)
+  else:
+    drawBitmap(`character gateX`, `character gateY` - 13, `character gateClosed`)
+    if player.collides(`character gateX`, 0, 6, 64): # Ensure you can't jump over gates
+      gameOver()
+
+proc characters(score: int16): int16 =
+  case score:
+  of int16.low..(-1): characters(abs(score)) + 1
+  of 0..9: 1
+  of 10..99: 2
+  of 100..999: 3
+  of 1000..9999: 4
+  of 10000..int16.high: 5
+
 proc playGame() =
   #createParticle(10, 20+ep.int16, 1.5.toFixed, (-0.5).toFixed)
-  #arduboy.setCursor(64 - ((score.float.log10 + 1) * 2.5).int16, 9)
-  #discard arduboy.print(score)
-  drawPlayer()
+  arduboy.setCursor(64 - (score.characters()*8) div 2, 9)
+  discard arduboy.print(score)
+  if scene != GameOver:
+    drawPlayer()
+  let player = playerBoundingBox()
   processLevelEntities:
   of Spike:
     drawBitmap(spikeX, spikeY, spike)
-  drawLevel()
+    if player.collides(spikeX, spikeY):
+      gameOver()
+  of ManFood:
+    drawBitmap(manfoodX, manfoodY, money)
+    processFood(man, Mann)
+  of BearFood:
+    drawBitmap(bearfoodX, bearfoodY, meat)
+    processFood(bear, Bar)
+  of PigFood:
+    drawBitmap(pigfoodX, pigfoodY, apple)
+    processFood(pig, Schwein)
+  of ManGate:
+    processGate(man, Mann)
+  of BearGate:
+    processGate(bear, Bar)
+  of PigGate:
+    processGate(pig, Schwein)
+  if subframe == 0:
+    yspeed += toSpeed(-0.25)
+  processLevel:
+    if subframe == 0:
+      if blockX + 6 > player.x and blockX < player.x + player.w.int16:
+        if 64 + 2 + 1 - 13 - (y + yspeed).getInt < blockY + 6 and
+          64 + 2 + 1 - 13 - (y + yspeed).getInt + 13 > blockY:
+          if 64 + 2 - 13 - y.getInt < blockY + 6 and
+            64 + 2 - 13 - y.getInt + 13 > blockY:
+            gameOver()
+          else:
+            if yspeed < toSpeed(0):
+              y.set(61 - blockY + 6)
+              yspeed = toSpeed(0)
+    drawBitmap(blockX, blockY, ground2)
   drawParticles()
-  if subFrame == 0:
+  if subframe == 0 and scene != GameOver:
     if arduboy.justPressed(BButton) or arduboy.justPressed(DownButton):
       currentCharacter.next()
-    if (arduboy.justPressed(AButton) or arduboy.justPressed(UpButton)) and yspeed == 0:
-      yspeed = 3
-      jframe = frame
-    let
-      start = frame div 6 + 2
-      h = y div 6
-      groundMask = 0b1000_0000'u8 shr (h - 1)
-      frontMask = 0b1000_0000'u8 shr h
-      frontMask2 = 0b1000_0000'u8 shr (h + 1)
-    template collides(tile: untyped): untyped =
-      (frontMask != 0 and (tile and frontMask) == frontMask) or
-      (frontMask2 != 0 and (tile and frontMask2) == frontMask2)
+    # TODO: Prevent double-jump
+    if (arduboy.justPressed(AButton) or arduboy.justPressed(UpButton)) and yspeed.getInt == 0:
+      yspeed.set 3
 
-    template landedOn(tile: untyped): untyped =
-      (groundMask != 0 and (tile and groundMask) == groundMask)
 
-    template collidesGate(c, state: untyped): untyped =
-      block:
-        let
-          nextGate = `c gates`[`c gateidx`]
-          gateX = (nextGate mod `c gates`.width)*6
-          lvlpos = `c gates`.width * 6 - frame
-        (currentCharacter != state and gateX < lvlpos and
-          lvlpos - gateX < 128 + 15 and lvlpos - gateX < 30 and
-          lvlpos - gateX > 20)
-
-    if landedOn(level[start]):
-      if yspeed < 0:
-        y = h * 6
-        yspeed = 0
-    elif (frame - jframe) mod 4 == 0:
-      yspeed -= 1
-    #if landedOn(spikes[start]):
-    #  gameOver()
-    if collides(level[start+1]):
-      gameOver()
-    block:
-      calculatePlayerBounds()
-      arduboy.fillRect(x, y, 8, 13)
-
-  #  if collidesGate(man, Mann) or collidesGate(bear, Bar) or
-  #    collidesGate(pig, Schwein):
-  #    gameOver()
-
-  #  template pickup(character, objects: untyped): untyped =
-  #    if currentCharacter == character and landedOn(objects[start]):
-  #      if (taken[start] and groundMask) == 0:
-  #        score += 500
-  #        let offset = (frame mod 6).int16
-  #        #createCircle(128 - 6*3 + offset, 14*6 + 7'i16 - y, 0.3)
-  #        taken[start] = taken[start] or groundMask
-  #    if currentCharacter == character and collides(objects[start+1]):
-  #      if (taken[start+1] and (frontMask or frontMask2)) == 0:
-  #        score += 500
-  #        let offset = (frame mod 6).int16
-  #        if (taken[start+1] and frontMask) == frontMask:
-  #          createCircle(128 - 6*4 + offset, 9*6 + 7'i16 - y, 0.3)
-  #          taken[start+1] = taken[start+1] or frontMask
-  #        else:
-  #          createCircle(128 - 6*4 + offset, 8*6 + 7'i16 - y, 0.3)
-  #          taken[start+1] = taken[start+1] or frontMask2
-  #  Mann.pickup(manfood)
-  #  Bar.pickup(bearfood)
-  #  Schwein.pickup(pigfood)
-
+    #arduboy.setCursor(4, 9)
+    #discard arduboy.print(y.getInt)
+    #arduboy.setCursor(4, 18)
+    #discard arduboy.print(yspeed.getInt)
     y += yspeed
+
+template playGameOver() =
+  if sp == ep:
+    frame = 0
+    scene = Title
+    currentCharacter = Mann
+    lowestMangateIdx = 0
+    lowestBeargateIdx = 0
+    lowestPiggateIdx = 0
+    lowestManfoodIdx = 0
+    lowestBearfoodIdx = 0
+    lowestPigfoodIdx = 0
+    lowestSpikeIdx = 0
+    reset takenManFood
+    reset takenBearFood
+    reset takenPigFood
+    sp = 0
+    ep = 0
+  playGame()
 
 proc loop*() {.exportc.} =
   if not arduboy.nextFrame():
     return
   while micros() - tempTime < myDelay: discard
   tempTime = micros()
+  #if scene != Title:
+  #  arduboy.pollButtons()
+  #  if not arduboy.justPressed(LeftButton): return
 
   # Updates the display every subframe for colours, or every full frame for bw
   if colours or subFrame == 0:
@@ -466,5 +491,7 @@ proc loop*() {.exportc.} =
   subFrame += 1
   if subFrame == 3:
     subFrame = 0
-    inc frame
-    inc score
+    #if score mod 10 == 0:
+    if scene != GameOver:
+      inc frame
+      inc score

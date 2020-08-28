@@ -391,7 +391,7 @@ proc bootLogoText*(this: var Arduboy2) {.importcpp: "bootLogoText",
                                      header: "Arduboy2.h".}
 proc bootLogoExtra*(this: var Arduboy2) {.importcpp: "bootLogoExtra",
                                       header: "Arduboy2.h".}
-proc write*(this: var Arduboy2; a2: uint8): csize {.importcpp: "write",
+proc write*(this: var Arduboy2; a2: uint8): csize_t {.importcpp: "write",
     header: "Arduboy2.h".}
 proc drawChar*(this: var Arduboy2; x: int16; y: int16; c: cuchar; color: uint8;
               bg: uint8; size: uint8) {.importcpp: "drawChar",
@@ -603,64 +603,64 @@ proc getWriteError*(this: var Arduboy2): cint {.importcpp: "getWriteError",
                                         header: "Print.h".}
 proc clearWriteError*(this: var Arduboy2) {.importcpp: "clearWriteError",
                                      header: "Print.h".}
-#proc write*(this: var Arduboy2; a2: uint8): csize {.importcpp: "write", header: "Print.h".}
-proc write*(this: var Arduboy2; str: cstring): csize {.importcpp: "write", header: "Print.h".}
-proc write*(this: var Arduboy2; buffer: ptr uint8; size: csize): csize {.
+#proc write*(this: var Arduboy2; a2: uint8): csize_t {.importcpp: "write", header: "Print.h".}
+proc write*(this: var Arduboy2; str: cstring): csize_t {.importcpp: "write", header: "Print.h".}
+proc write*(this: var Arduboy2; buffer: ptr uint8; size: csize_t): csize_t {.
     importcpp: "write", header: "Print.h".}
-proc write*(this: var Arduboy2; buffer: cstring; size: csize): csize {.importcpp: "write",
+proc write*(this: var Arduboy2; buffer: cstring; size: csize_t): csize_t {.importcpp: "write",
     header: "Print.h".}
-proc write*(this: var Arduboy2; t: cshort): csize {.importcpp: "write", header: "Print.h".}
-proc write*(this: var Arduboy2; t: cushort): csize {.importcpp: "write", header: "Print.h".}
-proc write*(this: var Arduboy2; t: cint): csize {.importcpp: "write", header: "Print.h".}
-proc write*(this: var Arduboy2; t: cuint): csize {.importcpp: "write", header: "Print.h".}
-proc write*(this: var Arduboy2; t: clong): csize {.importcpp: "write", header: "Print.h".}
-proc write*(this: var Arduboy2; t: culong): csize {.importcpp: "write", header: "Print.h".}
-proc write*(this: var Arduboy2; c: char): csize {.importcpp: "write", header: "Print.h".}
-proc write*(this: var Arduboy2; c: int8): csize {.importcpp: "write", header: "Print.h".}
-proc print*(this: var Arduboy2; a2: ptr FlashStringHelper): csize {.importcpp: "print",
+proc write*(this: var Arduboy2; t: cshort): csize_t {.importcpp: "write", header: "Print.h".}
+proc write*(this: var Arduboy2; t: cushort): csize_t {.importcpp: "write", header: "Print.h".}
+proc write*(this: var Arduboy2; t: cint): csize_t {.importcpp: "write", header: "Print.h".}
+proc write*(this: var Arduboy2; t: cuint): csize_t {.importcpp: "write", header: "Print.h".}
+proc write*(this: var Arduboy2; t: clong): csize_t {.importcpp: "write", header: "Print.h".}
+proc write*(this: var Arduboy2; t: culong): csize_t {.importcpp: "write", header: "Print.h".}
+proc write*(this: var Arduboy2; c: char): csize_t {.importcpp: "write", header: "Print.h".}
+proc write*(this: var Arduboy2; c: int8): csize_t {.importcpp: "write", header: "Print.h".}
+proc print*(this: var Arduboy2; a2: ptr FlashStringHelper): csize_t {.importcpp: "print",
     header: "Print.h".}
-#proc print*(this: var Arduboy2; a2: ptr FlashStringHelper): csize {.importcpp: "print",
+#proc print*(this: var Arduboy2; a2: ptr FlashStringHelper): csize_t {.importcpp: "print",
 #    header: "Print.h".}
-#proc print*(this: var Arduboy2; a2: String): csize {.importcpp: "print", header: "Print.h".}
-proc print*(this: var Arduboy2; a2: ptr char): csize {.importcpp: "print", header: "Print.h".}
-proc print*(this: var Arduboy2; a2: cstring): csize {.importcpp: "print", header: "Print.h".}
-proc print*(this: var Arduboy2; a2: char): csize {.importcpp: "print", header: "Print.h".}
-#proc print*(this: var Arduboy2; a2: cuchar; a3: cint = DEC): csize {.importcpp: "print",
+#proc print*(this: var Arduboy2; a2: String): csize_t {.importcpp: "print", header: "Print.h".}
+proc print*(this: var Arduboy2; a2: ptr char): csize_t {.importcpp: "print", header: "Print.h".}
+proc print*(this: var Arduboy2; a2: cstring): csize_t {.importcpp: "print", header: "Print.h".}
+proc print*(this: var Arduboy2; a2: char): csize_t {.importcpp: "print", header: "Print.h".}
+#proc print*(this: var Arduboy2; a2: cuchar; a3: cint = DEC): csize_t {.importcpp: "print",
 #    header: "Print.h".}
-#proc print*(this: var Arduboy2; a2: cint; a3: cint = DEC): csize {.importcpp: "print",
+#proc print*(this: var Arduboy2; a2: cint; a3: cint = DEC): csize_t {.importcpp: "print",
 #    header: "Print.h".}
-proc print*(this: var Arduboy2; a2: cuint; a3: cint = DEC): csize {.importcpp: "print",
+proc print*(this: var Arduboy2; a2: cuint; a3: cint = DEC): csize_t {.importcpp: "print",
     header: "Print.h".}
-proc print*(this: var Arduboy2; a2: clong; a3: cint = DEC): csize {.importcpp: "print",
+proc print*(this: var Arduboy2; a2: clong; a3: cint = DEC): csize_t {.importcpp: "print",
     header: "Print.h".}
-proc print*(this: var Arduboy2; a2: culong; a3: cint = DEC): csize {.importcpp: "print",
+proc print*(this: var Arduboy2; a2: culong; a3: cint = DEC): csize_t {.importcpp: "print",
     header: "Print.h".}
-#proc print*(this: var Arduboy2; a2: cdouble; a3: cint = 2): csize {.importcpp: "print",
+#proc print*(this: var Arduboy2; a2: cdouble; a3: cint = 2): csize_t {.importcpp: "print",
 #    header: "Print.h".}
-#proc print*(this: var Arduboy2; a2: Printable): csize {.importcpp: "print",
+#proc print*(this: var Arduboy2; a2: Printable): csize_t {.importcpp: "print",
 #    header: "Print.h".}
-#proc println*(this: var Arduboy2; a2: ptr __FlashStringHelper): csize {.
+#proc println*(this: var Arduboy2; a2: ptr __FlashStringHelper): csize_t {.
 #    importcpp: "println", header: "Print.h".}
-#proc println*(this: var Arduboy2; s: String): csize {.importcpp: "println",
+#proc println*(this: var Arduboy2; s: String): csize_t {.importcpp: "println",
 #    header: "Print.h".}
-proc println*(this: var Arduboy2; a2: ptr char): csize {.importcpp: "println",
+proc println*(this: var Arduboy2; a2: ptr char): csize_t {.importcpp: "println",
     header: "Print.h".}
-proc println*(this: var Arduboy2; a2: char): csize {.importcpp: "println", header: "Print.h".}
-proc println*(this: var Arduboy2; a2: cuchar; a3: cint = DEC): csize {.importcpp: "println",
+proc println*(this: var Arduboy2; a2: char): csize_t {.importcpp: "println", header: "Print.h".}
+proc println*(this: var Arduboy2; a2: cuchar; a3: cint = DEC): csize_t {.importcpp: "println",
     header: "Print.h".}
-proc println*(this: var Arduboy2; a2: cint; a3: cint = DEC): csize {.importcpp: "println",
+proc println*(this: var Arduboy2; a2: cint; a3: cint = DEC): csize_t {.importcpp: "println",
     header: "Print.h".}
-proc println*(this: var Arduboy2; a2: cuint; a3: cint = DEC): csize {.importcpp: "println",
+proc println*(this: var Arduboy2; a2: cuint; a3: cint = DEC): csize_t {.importcpp: "println",
     header: "Print.h".}
-proc println*(this: var Arduboy2; a2: clong; a3: cint = DEC): csize {.importcpp: "println",
+proc println*(this: var Arduboy2; a2: clong; a3: cint = DEC): csize_t {.importcpp: "println",
     header: "Print.h".}
-proc println*(this: var Arduboy2; a2: culong; a3: cint = DEC): csize {.importcpp: "println",
+proc println*(this: var Arduboy2; a2: culong; a3: cint = DEC): csize_t {.importcpp: "println",
     header: "Print.h".}
-proc println*(this: var Arduboy2; a2: cdouble; a3: cint = 2): csize {.importcpp: "println",
+proc println*(this: var Arduboy2; a2: cdouble; a3: cint = 2): csize_t {.importcpp: "println",
     header: "Print.h".}
-#proc println*(this: var Arduboy2; a2: Printable): csize {.importcpp: "println",
+#proc println*(this: var Arduboy2; a2: Printable): csize_t {.importcpp: "println",
 #    header: "Print.h".}
-proc println*(this: var Arduboy2): csize {.importcpp: "println", header: "Print.h".}
+proc println*(this: var Arduboy2): csize_t {.importcpp: "println", header: "Print.h".}
 proc flush*(this: var Arduboy2) {.importcpp: "flush", header: "Print.h".}
 
 proc drawPixel*(this: var Arduboy2, x: int16; y: int16; color: uint8 = WHITE) {.
