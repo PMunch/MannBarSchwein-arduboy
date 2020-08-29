@@ -301,13 +301,14 @@ proc drawParticles() =
   sp += deadParticles
 
 proc createParticle(x, y: int16, xs, ys: Speed) =
-  particles[ep].age = 0
-  particles[ep].x.set x
-  particles[ep].y.set y
-  particles[ep].xs = xs
-  particles[ep].ys = ys
+  let part = ep mod particles.len.uint16
+  particles[part].age = 0
+  particles[part].x.set x
+  particles[part].y.set y
+  particles[part].xs = xs
+  particles[part].ys = ys
   inc ep
-  if ep == sp:
+  if ep mod particles.len.uint16 == sp mod particles.len.uint16:
     inc sp
 
 template next(character: var Character) =
@@ -331,8 +332,8 @@ macro createParticleCircle(x, y: int, speed: static[float], startAngle: static[i
     let
       xs = (speed * cos(angle.float.degToRad))
       ys = (speed * sin(angle.float.degToRad))
-    #result.add quote do:
-    #  createParticle(`x`, `y`, toSpeed(`xs`), toSpeed(`ys`))
+    result.add quote do:
+      createParticle(`x`, `y`, toSpeed(`xs`), toSpeed(`ys`))
   echo result.repr
 
 macro play(scene: Scene) =
