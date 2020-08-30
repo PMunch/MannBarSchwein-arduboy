@@ -8,7 +8,7 @@ import fixedpoint
 defFixedPoint(Speed, int8, 4)
 defFixedPoint(Position, int16, 4)
 
-const colours = false
+const colours = true
 
 const spritePath {.strdefine.}: string = "sprites/"
 
@@ -63,6 +63,14 @@ type
     age: uint8
     x, y: Position
     xs, ys: Speed
+  BackdropSprite = enum
+    Big, Small
+  Backdrop = object
+    sprite: BackdropSprite
+    x: Position
+    y: int16
+    speed: Speed
+
 
 proc `[]`(data: LevelData, idx: uint32): uint8 =
   pgmReadByte(cast[ptr uint8](cast[int](data.unsafeAddr) + idx.int))
@@ -153,6 +161,7 @@ var
   takenManFood: set[0..manFoods.count]
   takenBearFood: set[0..bearFoods.count]
   takenPigFood: set[0..pigFoods.count]
+  backdrops: array[5, Backdrop]
 
 template legFrame(): untyped = [leg1.unsafeAddr, leg2.unsafeAddr][(frame div 4) mod 2][]
 
@@ -170,36 +179,20 @@ proc playerBoundingBox(): tuple[x, y: int16, w, h: uint8] =
 proc drawPlayer() =
   calculatePlayerBounds()
   if subFrame == 0 and currentCharacter == Bar:
-    drawBitmap(x, y-hy, bearHead, NoMask, SpriteUnMasked)
-    drawBitmap(x+2, y+7-by, bearBody, NoMask, SpriteUnMasked)
-    drawBitmap(x+1, y+11-by, legFrame, NoMask, SpriteUnMasked)
+    drawBitmap(x, y-hy, bearHead)
+    drawBitmap(x+2, y+7-by, bearBody)
+    drawBitmap(x+1, y+11-by, legFrame)
   if subFrame == 1 and currentCharacter == Mann:
-    drawBitmap(x, y-hy, manHead, NoMask, SpriteUnMasked)
-    drawBitmap(x+2, y+7-by, manBody, NoMask, SpriteUnMasked)
-    drawBitmap(x+1, y+11-by, legFrame, NoMask, SpriteUnMasked)
+    drawBitmap(x, y-hy, manHead)
+    drawBitmap(x+2, y+7-by, manBody)
+    drawBitmap(x+1, y+11-by, legFrame)
   if subFrame == 2 and currentCharacter == Schwein:
-    drawBitmap(x, y-hy, pigHead, NoMask, SpriteUnMasked)
-    drawBitmap(x+2, y+7-by, pigBody, NoMask, SpriteUnMasked)
-    drawBitmap(x+1, y+11-by, legFrame, NoMask, SpriteUnMasked)
-
-#template drawGate(c, state: untyped): untyped =
-#  let
-#    nextGate = `c gates`[`lowest c idx`]
-#    gateX = (nextGate mod `c gates`.width) * 6
-#    gateY = nextGate div `c gates`.width
-#    lvlpos = `c gates`.width * 6 - frame
-#  if gateX < lvlpos and lvlpos - gateX < 128 + 15:
-#    if currentCharacter == state:
-#      drawBitmap(128 - (lvlpos - gateX).int16, (gateY * 6).int16 + 4, `c gate`)
-#    else:
-#      drawBitmap(128 - (lvlpos - gateX).int16, (gateY * 6).int16 + 4, `c gateClosed`)
-#  if lvlpos - gateX > uint16.high-100 and `lowest c idx` < `c gates`.count - 1:
-#    inc `lowest c idx`
+    drawBitmap(x, y-hy, pigHead)
+    drawBitmap(x+2, y+7-by, pigBody)
+    drawBitmap(x+1, y+11-by, legFrame)
 
 template processEntity(entity, spriteWidth, action: untyped): untyped =
   var passed = typeof(`lowest entity Idx`).default
-  #if `lowest entity Idx` != `entity s`.width:
-  #  for i in `lowest entity Idx` ..< `entity s`.width:
   for i in `lowest entity Idx` ..< `entity s`.count:
     if (when declared(`taken entity`): not `taken entity`.contains i else: true):
       let
@@ -263,6 +256,29 @@ template processLevel(action: untyped) =
 
       mask = mask shl 1
       h -= 6
+
+proc drawBackdrops() =
+  if subFrame == 2:
+    for backdrop in backdrops.mitems:
+      case backdrop.sprite:
+      of Big:
+        drawBitmap(backdrop.x.getInt, backdrop.y, mountainBig)
+      of Small:
+        drawBitmap(backdrop.x.getInt, backdrop.y, mountainSmall)
+      if scene != GameOver:
+        backdrop.x += backdrop.speed
+      if backdrop.x > toPosition(128):
+        backdrop.x = toPosition(-44)
+        case frame and 0b1:
+        of 0:
+          backdrop.sprite = Small
+          backdrop.y = 64 - 4 - 22
+        of 1:
+          backdrop.sprite = Big
+          backdrop.y = 64 - 4 - 44
+        else: discard
+        #case frame and 0b111:
+        
 
 proc drawTitle() =
   if subFrame == 0 and frame > 50:
@@ -352,6 +368,13 @@ proc playTitle() =
       score = 0
       y = toPosition(20)
       yspeed = toSpeed(-0.5)
+      backdrops = [
+        Backdrop(x: toPosition(-43), y: 64 - 4 - 44, sprite: Big, speed: toSpeed(1)),
+        Backdrop(x: toPosition(-20), y: 64 - 4 - 40, sprite: Big, speed: toSpeed(1.1)),
+        Backdrop(x: toPosition(0), y: 64 - 4 - 30, sprite: Big, speed: toSpeed(1.3)),
+        Backdrop(x: toPosition(40), y: 64 - 4 - 10, sprite: Small, speed: toSpeed(0.1)),
+        Backdrop(x: toPosition(60), y: 64 - 4 - 17, sprite: Small, speed: toSpeed(1))
+      ]
     let keys = arduboy.buttonsState()
     if (keys and UP_BUTTON) != 0:
       myDelay += 10
@@ -396,6 +419,7 @@ proc playGame() =
   #createParticle(10, 20+ep.int16, 1.5.toFixed, (-0.5).toFixed)
   arduboy.setCursor(64 - (score.characters()*8) div 2, 9)
   discard arduboy.print(score)
+  drawBackdrops()
   if scene != GameOver:
     drawPlayer()
   let player = playerBoundingBox()
@@ -421,19 +445,26 @@ proc playGame() =
     processGate(pig, Schwein)
   if subframe == 0:
     yspeed += toSpeed(-0.25)
-  processLevel:
-    if subframe == 0:
+    processLevel:
       if blockX + 6 > player.x and blockX < player.x + player.w.int16:
-        if 64 + 2 + 1 - 13 - (y + yspeed).getInt < blockY + 6 and
-          64 + 2 + 1 - 13 - (y + yspeed).getInt + 13 > blockY:
-          if 64 + 2 - 13 - y.getInt < blockY + 6 and
-            64 + 2 - 13 - y.getInt + 13 > blockY:
+        if 64 + 2 + 1 - 14 - (y + yspeed).getInt < blockY + 6 and
+          64 + 2 + 1 - 14 - (y + yspeed).getInt + 13 > blockY:
+          if 64 + 2 - 14 - y.getInt < blockY + 6 and
+            64 + 2 - 14 - y.getInt + 13 > blockY:
             gameOver()
           else:
             if yspeed < toSpeed(0):
-              y.set(61 - blockY + 6)
+              y.set(60 - blockY + 6)
               yspeed = toSpeed(0)
-    drawBitmap(blockX, blockY, ground2)
+            if scene != GameOver:
+              createParticle(player.x + 4, player.y + 13, toSpeed(0.5),
+                case frame mod 3:
+                of 0: toSpeed(-0.7)
+                of 1: toSpeed(-0.5)
+                of 2: toSpeed(-1)
+                else: toSpeed(0) # Won't happen
+              )
+      drawBitmap(blockX, blockY, ground2)
   drawParticles()
   if subframe == 0 and scene != GameOver:
     if arduboy.justPressed(BButton) or arduboy.justPressed(DownButton):
@@ -441,7 +472,6 @@ proc playGame() =
     # TODO: Prevent double-jump
     if (arduboy.justPressed(AButton) or arduboy.justPressed(UpButton)) and yspeed.getInt == 0:
       yspeed.set 3
-
 
     #arduboy.setCursor(4, 9)
     #discard arduboy.print(y.getInt)

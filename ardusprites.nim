@@ -438,4 +438,4 @@ template drawBitmap*[count, w, h: static[int]](x, y: int16, bitmap, mask: Sprite
       drawBitmap(x, y, cast[ptr uint8](bitmap.unsafeAddr), cast[ptr uint8](mask.unsafeAddr), w, h, draw_mode.uint8)
 
 template drawBitmap*[count, w, h: static[int]](x, y: int16, bitmap: Sprite[count, w, h]) =
-  drawBitmap(x, y, bitmap, NoMask, SpriteUnMasked)
+  drawBitmap(x, y, bitmap, NoMask, SpriteIsMask)
