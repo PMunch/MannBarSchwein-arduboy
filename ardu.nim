@@ -6,8 +6,8 @@ import tables
 import fixedpoint
 
 const
-  colours = false
-  backdrop = false
+  colours = true
+  backdrop = true
   spritePath {.strdefine.}: string = "sprites/"
 
 # Set up fixed point types
@@ -209,10 +209,10 @@ proc drawBackdrops() =
         case frame and 0b1:
         of 0:
           backdrops[i].sprite = Small
-          backdrops[i].y = 64 - 4 - 22
+          backdrops[i].y = 64 - 4 - 22 + (frame and 0b111).int16
         of 1:
           backdrops[i].sprite = Big
-          backdrops[i].y = 64 - 4 - 44
+          backdrops[i].y = 64 - 4 - 44 + (frame and 0b1111).int16
         else: discard
 
 proc drawTitle() =
