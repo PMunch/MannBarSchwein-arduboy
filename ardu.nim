@@ -1,17 +1,36 @@
 include arduboy
-import ardusprites
 import macros, macroutils
+import ardusprites
 import math
 import tables
 import fixedpoint
 
+const
+  colours = false
+  backdrop = false
+  spritePath {.strdefine.}: string = "sprites/"
+
+# Set up fixed point types
 defFixedPoint(Speed, int8, 4)
 defFixedPoint(Position, int16, 4)
 
-const colours = true
+type
+  Scene = enum
+    Title, Highscore, Game, GameOver
+  Character = enum
+    Mann, Bar, Schwein
+  Particle = object
+    age: uint8
+    x, y: Position
+    xs, ys: Speed
+  BackdropSprite = enum
+    Big, Small
+  Backdrop = object
+    sprite: BackdropSprite
+    x: Position
+    y: int16
 
-const spritePath {.strdefine.}: string = "sprites/"
-
+# Load all our sprites
 loadSprite(leg1, spritePath & "leg_frame1_alt.bmp")
 loadSprite(leg2, spritePath & "leg_frame2_alt.bmp")
 loadSprite(leg3, spritePath & "leg_frame3.bmp")
@@ -35,99 +54,20 @@ loadSprite(ground2, spritePath & "block.bmp")
 loadSprite(spike, spritePath & "spike.bmp")
 loadSprite(mountainSmall, spritePath & "mountain_small.bmp")
 loadSprite(mountainBig, spritePath & "mountain_big.bmp")
+loadSprite(mountainSmallMask, spritePath & "mountain_small_mask.bmp")
+loadSprite(mountainBigMask, spritePath & "mountain_big_mask.bmp")
 loadSprite(mann, spritePath & "mann.bmp")
 loadSprite(bar, spritePath & "bar.bmp")
 loadSprite(schwein, spritePath & "schwein.bmp")
 
-proc yield_impl*() {.exportc: "yield".} = discard
-#proc F(x: cstring): ptr FlashStringHelper {.importc, nodecl.}
-proc micros(): culong {.importc, nodecl.}
-proc pgm_read_byte(x: ptr uint8): uint8 {.importc, nodecl.}
-proc pgm_read_word(x: ptr uint8): uint16 {.importc, nodecl.}
+var
+  # We don't call NimMain anywhere, so you can't instantiate variables here
+  arduboy: Arduboy2
+  score: int16
 
-proc toFixed(x: float): int8 {.compileTime.} =
-  #x.trunc.int8 shl 4 + ((x - x.trunc)*10).int8
-  round(x * (1 shl 4)).int8
+include levelloader, highscores # Includes for simplicity
 
-proc roundFixed(x: int16): int16 =
-  (x + toFixed(0.5).int16) shr 4
-
-type
-  Scene = enum
-    Title, Game, GameOver
-  Character = enum
-    Mann, Bar, Schwein
-  LevelData[count: static[int]] = distinct array[count, uint8]
-  PositionData[count, width: static[int]] = distinct array[count, uint16]
-  Particle = object
-    age: uint8
-    x, y: Position
-    xs, ys: Speed
-  BackdropSprite = enum
-    Big, Small
-  Backdrop = object
-    sprite: BackdropSprite
-    x: Position
-    y: int16
-    speed: Speed
-
-
-proc `[]`(data: LevelData, idx: uint32): uint8 =
-  pgmReadByte(cast[ptr uint8](cast[int](data.unsafeAddr) + idx.int))
-
-proc `[]`(data: PositionData, idx: SomeInteger): uint16 =
-  pgmReadWord(cast[ptr uint8](cast[int](data.unsafeAddr) + (idx * 2).int))
-  #array[data.count, uint16](data)[idx]
-
-macro loadPositions(name: untyped, levelString: static[string]): untyped =
-  #echo levelString
-  #echo levelString.len
-  #echo levelString[654]
-  let w = levelString.find('\n')
-  #echo "w: ", w
-  var levelData = nnkBracket.newTree()
-  for i in countdown(w, 1):
-    for j in countdown(7, 0):
-      let
-        idx = (w+1)*j + i - 1
-        pos = w*j + i - 1
-      #echo "pos: ", pos, " ", ord(levelString[pos])
-      if levelString[idx] == '#':
-        levelData.add newLit(pos.uint16)
-    #echo line.int.toBin 8
-  let count = levelData.len
-  result = quote do:
-    let `name` {.codegenDecl: "const PROGMEM $# $#".} = PositionData[`count`, `w`](`levelData`)
-    #let `name` = PositionData[`count`, `w`](`levelData`)
-  echo result.repr
-
-macro loadLevel(name: untyped, levelString: static[string]): untyped =
-  #echo levelString
-  #echo levelString.len
-  #echo levelString[654]
-  let w = levelString.find('\n')
-  #echo "w: ", w
-  var levelData = nnkBracket.newTree()
-  for i in countdown(w, 1):
-    var line = 0'u8
-    for j in countdown(7, 0):
-      let pos = (w+1)*j + i - 1
-      #echo "pos: ", pos, " ", ord(levelString[pos])
-      line = line or ((levelString[pos] == '#').uint8 shl j)
-    #echo line.int.toBin 8
-    levelData.add newLit(line)
-  let count = levelData.len
-  result = quote do:
-    let `name` {.codegenDecl: "const PROGMEM $# $#".} = LevelData[`count`](`levelData`)
-  echo result.repr
-
-template loadPositionData(name: untyped, file: static[string]): untyped =
-  loadPositions(name, loadBMP(file))
-
-template loadLevelData(name: untyped, file: static[string]): untyped =
-  loadLevel(name, loadBMP(file))
-
-
+# Load the level data
 loadLevelData(level, "level.bmp")
 loadPositionData(manfoods, "manfood.bmp")
 loadPositionData(bearfoods, "bearfood.bmp")
@@ -138,8 +78,6 @@ loadPositionData(piggates, "piggate.bmp")
 loadPositionData(beargates, "beargate.bmp")
 
 var
-  # We don't call NimMain anywhere, so you can't instantiate variables here
-  arduboy: Arduboy2
   subFrame: uint8
   frame: uint32
   myDelay: culong
@@ -148,7 +86,6 @@ var
   currentCharacter: Character
   y: Position
   yspeed: Speed
-  score: int16
   particles: array[150, Particle]
   sp, ep: uint16
   lowestManFoodIdx: uint16
@@ -178,15 +115,15 @@ proc playerBoundingBox(): tuple[x, y: int16, w, h: uint8] =
 
 proc drawPlayer() =
   calculatePlayerBounds()
-  if subFrame == 0 and currentCharacter == Bar:
+  if subFrame >= 0 and currentCharacter == Bar:
     drawBitmap(x, y-hy, bearHead)
     drawBitmap(x+2, y+7-by, bearBody)
     drawBitmap(x+1, y+11-by, legFrame)
-  if subFrame == 1 and currentCharacter == Mann:
+  if subFrame >= 1 and currentCharacter == Mann:
     drawBitmap(x, y-hy, manHead)
     drawBitmap(x+2, y+7-by, manBody)
     drawBitmap(x+1, y+11-by, legFrame)
-  if subFrame == 2 and currentCharacter == Schwein:
+  if subFrame >= 2 and currentCharacter == Schwein:
     drawBitmap(x, y-hy, pigHead)
     drawBitmap(x+2, y+7-by, pigBody)
     drawBitmap(x+1, y+11-by, legFrame)
@@ -220,17 +157,17 @@ macro processLevelEntities(branches: varargs[untyped]): untyped =
   for branch in branches:
     actions[parseEnum[Entity]($branch[0])] = branch[1]
   result = superQuote do:
-    if subFrame == 1:
+    if subFrame >= 1:
       processEntity(mangate, 15):
         `actions[ManGate]`
       processEntity(manfood, 6):
         `actions[ManFood]`
-    if subFrame == 2:
+    if subFrame >= 2:
       processEntity(piggate, 15):
         `actions[PigGate]`
       processEntity(pigfood, 6):
         `actions[PigFood]`
-    if subFrame == 0:
+    if subFrame >= 0:
       processEntity(beargate, 15):
         `actions[BearGate]`
       processEntity(spike, 6):
@@ -259,26 +196,24 @@ template processLevel(action: untyped) =
 
 proc drawBackdrops() =
   if subFrame == 2:
-    for backdrop in backdrops.mitems:
-      case backdrop.sprite:
+    for i in 0..backdrops.high:
+      case backdrops[i].sprite:
       of Big:
-        drawBitmap(backdrop.x.getInt, backdrop.y, mountainBig)
+        drawBitmap(backdrops[i].x.getInt, backdrops[i].y, mountainBig, mountainBigMask, SpriteMasked)
       of Small:
-        drawBitmap(backdrop.x.getInt, backdrop.y, mountainSmall)
+        drawBitmap(backdrops[i].x.getInt, backdrops[i].y, mountainSmall, mountainSmallMask, SpriteMasked)
       if scene != GameOver:
-        backdrop.x += backdrop.speed
-      if backdrop.x > toPosition(128):
-        backdrop.x = toPosition(-44)
+        backdrops[i].x += [toSpeed(0.3), toSpeed(0.4), toSpeed(0.5), toSpeed(0.6), toSpeed(0.7)][i]
+      if backdrops[i].x > toPosition(128):
+        backdrops[i].x.set -(44 * (1 + (frame and 0b11)).int)
         case frame and 0b1:
         of 0:
-          backdrop.sprite = Small
-          backdrop.y = 64 - 4 - 22
+          backdrops[i].sprite = Small
+          backdrops[i].y = 64 - 4 - 22
         of 1:
-          backdrop.sprite = Big
-          backdrop.y = 64 - 4 - 44
+          backdrops[i].sprite = Big
+          backdrops[i].y = 64 - 4 - 44
         else: discard
-        #case frame and 0b111:
-        
 
 proc drawTitle() =
   if subFrame == 0 and frame > 50:
@@ -310,7 +245,6 @@ proc drawParticles() =
         (if scene != GameOver: toSpeed(1) else: toSpeed(0))
       particle.y += particle.ys
       particle.ys += toSpeed(0.1)
-      #if frame mod 2 == 0:
       inc particle.age
     if subFrame == particle.age div 3:
       arduboy.drawPixel(particle.x.getInt, particle.y.getInt)
@@ -334,7 +268,7 @@ template next(character: var Character) =
 proc setup*() {.exportc.} =
   arduboy.begin()
   arduboy.setFramerate(255)
-  myDelay = 7245 #4705
+  myDelay = 7245
 
 template gameOver() =
   if scene != GameOver:
@@ -359,22 +293,25 @@ macro play(scene: Scene) =
   for scene in Scene:
     result.add nnkOfBranch.newTree(newLit(scene), newCall(newIdentNode("play" & $scene)))
 
+proc startGame() =
+  scene = Game
+  frame = 0
+  score = 0
+  y = toPosition(20)
+  yspeed = toSpeed(-0.5)
+  backdrops = [
+    Backdrop(x: toPosition(-43), y: 64 - 4 - 44, sprite: Big),
+    Backdrop(x: toPosition(-20), y: 64 - 4 - 40, sprite: Big),
+    Backdrop(x: toPosition(0), y: 64 - 4 - 30, sprite: Big),
+    Backdrop(x: toPosition(40), y: 64 - 4 - 10, sprite: Small),
+    Backdrop(x: toPosition(60), y: 64 - 4 - 17, sprite: Small)
+  ]
+
 proc playTitle() =
   drawTitle()
   if subFrame == 0 and frame > 50: # Slight delay here to make sure that a mistimed jump doesn't start a new game
     if arduboy.pressed(AButton):
-      scene = Game
-      frame = 0
-      score = 0
-      y = toPosition(20)
-      yspeed = toSpeed(-0.5)
-      backdrops = [
-        Backdrop(x: toPosition(-43), y: 64 - 4 - 44, sprite: Big, speed: toSpeed(1)),
-        Backdrop(x: toPosition(-20), y: 64 - 4 - 40, sprite: Big, speed: toSpeed(1.1)),
-        Backdrop(x: toPosition(0), y: 64 - 4 - 30, sprite: Big, speed: toSpeed(1.3)),
-        Backdrop(x: toPosition(40), y: 64 - 4 - 10, sprite: Small, speed: toSpeed(0.1)),
-        Backdrop(x: toPosition(60), y: 64 - 4 - 17, sprite: Small, speed: toSpeed(1))
-      ]
+      startGame()
     let keys = arduboy.buttonsState()
     if (keys and UP_BUTTON) != 0:
       myDelay += 10
@@ -384,6 +321,15 @@ proc playTitle() =
       myDelay -= 1
     if (keys and RIGHT_BUTTON) != 0:
       myDelay += 1
+  if frame > 1000:
+    scene = Highscore
+
+proc playHighScore() =
+  if displayHighScores():
+    startGame()
+  else:
+    scene = Title
+    frame = 0
 
 template collides(bounds: tuple[x, y: int16, w, h: uint8], entityX, entityY: int16, entityW, entityH = 6'u8): bool =
   bounds.x < entityX + entityW.int16 and
@@ -416,10 +362,10 @@ proc characters(score: int16): int16 =
   of 10000..int16.high: 5
 
 proc playGame() =
-  #createParticle(10, 20+ep.int16, 1.5.toFixed, (-0.5).toFixed)
   arduboy.setCursor(64 - (score.characters()*8) div 2, 9)
   discard arduboy.print(score)
-  drawBackdrops()
+  when backdrop:
+    drawBackdrops()
   if scene != GameOver:
     drawPlayer()
   let player = playerBoundingBox()
@@ -444,12 +390,13 @@ proc playGame() =
   of PigGate:
     processGate(pig, Schwein)
   if subframe == 0:
-    yspeed += toSpeed(-0.25)
-    processLevel:
+    yspeed += toSpeed(-0.1)
+  processLevel:
+    if subframe >= 0:
       if blockX + 6 > player.x and blockX < player.x + player.w.int16:
-        if 64 + 2 + 1 - 14 - (y + yspeed).getInt < blockY + 6 and
+        if 64 + 2 + 1 - 14 - (y + yspeed).getInt < blockY + 5 and
           64 + 2 + 1 - 14 - (y + yspeed).getInt + 13 > blockY:
-          if 64 + 2 - 14 - y.getInt < blockY + 6 and
+          if 64 + 2 - 14 - y.getInt < blockY + 5 and
             64 + 2 - 14 - y.getInt + 13 > blockY:
             gameOver()
           else:
@@ -464,19 +411,17 @@ proc playGame() =
                 of 2: toSpeed(-1)
                 else: toSpeed(0) # Won't happen
               )
-      drawBitmap(blockX, blockY, ground2)
+    drawBitmap(blockX, blockY, ground2)
+  if player.y > 64:
+    gameOver()
   drawParticles()
   if subframe == 0 and scene != GameOver:
     if arduboy.justPressed(BButton) or arduboy.justPressed(DownButton):
       currentCharacter.next()
     # TODO: Prevent double-jump
     if (arduboy.justPressed(AButton) or arduboy.justPressed(UpButton)) and yspeed.getInt == 0:
-      yspeed.set 3
+      yspeed.set 2
 
-    #arduboy.setCursor(4, 9)
-    #discard arduboy.print(y.getInt)
-    #arduboy.setCursor(4, 18)
-    #discard arduboy.print(yspeed.getInt)
     y += yspeed
 
 template playGameOver() =
@@ -496,6 +441,7 @@ template playGameOver() =
     reset takenPigFood
     sp = 0
     ep = 0
+    enterHighScore()
   playGame()
 
 proc loop*() {.exportc.} =
@@ -503,9 +449,6 @@ proc loop*() {.exportc.} =
     return
   while micros() - tempTime < myDelay: discard
   tempTime = micros()
-  #if scene != Title:
-  #  arduboy.pollButtons()
-  #  if not arduboy.justPressed(LeftButton): return
 
   # Updates the display every subframe for colours, or every full frame for bw
   if colours or subFrame == 0:
@@ -514,6 +457,7 @@ proc loop*() {.exportc.} =
   if subFrame == 0:
     arduboy.clear()
     arduboy.pollButtons()
+    # Debug print for setting myDelay
     #arduboy.setCursor(4, 9)
     #discard arduboy.Print(myDelay)
 
@@ -522,7 +466,6 @@ proc loop*() {.exportc.} =
   subFrame += 1
   if subFrame == 3:
     subFrame = 0
-    #if score mod 10 == 0:
     if scene != GameOver:
       inc frame
       inc score

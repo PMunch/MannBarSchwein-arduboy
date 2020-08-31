@@ -15,6 +15,9 @@ const arduinoPath {.strdefine.}: string = ""
 {.compile: arduinoPath & "/cores/arduino/Print.cpp".}
 {.compile: arduinoPath & "/cores/arduino/abi.cpp".}
 
+proc yield_impl*() {.exportc: "yield".} = discard
+proc micros(): culong {.importc, nodecl.}
+
 template read4bytes(bmp: untyped, pos: int): untyped =
   bmp[pos].int or bmp[pos + 1].int shl 8 or bmp[pos + 2].int shl 16 or bmp[pos + 3].int shl 24
 
@@ -68,3 +71,6 @@ proc loadBMP*(filename: static[string]): string {.compileTime.} =
       result.add "\n" & y[i]
   else:
     doAssert dibsize in {40, 108, 124}, "Unknown DIB header format: " & $dibsize
+
+proc pgm_read_byte(x: ptr uint8): uint8 {.importc, nodecl.}
+proc pgm_read_word(x: ptr uint8): uint16 {.importc, nodecl.}
