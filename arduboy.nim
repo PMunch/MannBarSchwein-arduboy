@@ -1,4 +1,4 @@
-import nimfiles / [Arduboy2, Arduboy2Core]
+import nimfiles / [Arduboy2, Arduboy2Core, EEPROMLib]
 import strutils
 
 const arduinoPath {.strdefine.}: string = ""
@@ -72,5 +72,24 @@ proc loadBMP*(filename: static[string]): string {.compileTime.} =
   else:
     doAssert dibsize in {40, 108, 124}, "Unknown DIB header format: " & $dibsize
 
-proc pgm_read_byte(x: ptr uint8): uint8 {.importc, nodecl.}
-proc pgm_read_word(x: ptr uint8): uint16 {.importc, nodecl.}
+proc pgm_read_byte*(x: ptr uint8): uint8 {.importc, nodecl.}
+proc pgm_read_word*(x: ptr uint8): uint16 {.importc, nodecl.}
+
+template readUint16*(e: EEPROMClass, pos: untyped): untyped =
+  let
+    hi = e.read(pos)
+    lo = e.read(pos + 1)
+    res =
+      if hi == 0xFF and lo == 0xFF:
+        0'u16
+      else:
+        (hi.uint16 shl 8) or lo.uint16
+  res
+
+iterator roundRange[R, T](buffer: var array[R, T], longRange: HSlice): var T =
+  ## Iterator that takes a buffer and two indices. The buffer is treated as
+  ## circular, and the indices are intended to be exclusively increasing.
+  assert R.low == 0, "Currently only supports zero-indexed arrays"
+  for i in longRange:
+    yield buffer[int(i) mod buffer.len]
+
